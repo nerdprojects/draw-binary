@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Draw Binary!</title>
+<style>
+canvas {
+  image-rendering: pixelated;
+  margin-top: 50px;
+  cursor: crosshair;
+}
+#controls {
+  background: black;
+  color: white;
+  padding: 10px;
+  font-family: sans-serif;
+  margin-bottom: 10px;
+  position: fixed;
+  height: 22px;
+}
+#controls label {
+  margin-left: 15px;
+  margin-right: 5px;
+}
+#controls input[type="number"] {
+  width: 50px;
+}
+</style>
+</head>
+<body>
+<div id="controls">
+<label for="file">File:</label>
+<input name="file" type="file" id="file-input" />
+<label for="mode">Color:</label>
+<select name="mode" id="mode-select">
+    <option value="bitmapMSB">Bitmap MSB</option>
+    <option value="bitmapLSB">Bitmap LSB</option>
+    <option value="gray8U" selected="selected">Grayscale (8U)</option>
+    <option value="gray16SLE">Grayscale (16S/LE)</option>
+    <option value="gray16SBE">Grayscale (16S/BE)</option>
+    <option value="color">Color</option>
+</select>
+<label for="inverse">Inverse:</label>
+<input name="inverse" type="checkbox" id="inverse" />
+<label for="width">Row Width:</label>
+<input name="width" id="width" type="number" value="128" />
+<label for="scale">Pixel Size:</label>
+<input name="scale" id="scale" type="number" value="2" step="0.1" />
+<label for="columns">Column Count:</label>
+<input name="columns" id="columns" type="number" value="4" step="1" />
+<label for="file-offset">File Offset:</label>
+<input name="file-offset" id="file-offset" type="number" value="0" step="1" min="0" />
+<label for="bit-offset">Bit Offset:</label>
+<input name="bit-offset" id="bit-offset" type="number" value="0" step="1" min="0" max="7" />
+</div>
+<canvas id="canvas"></canvas>
+<script>
+
+var content;
+var mode = document.getElementById('mode-select').value;
+var canvas = document.getElementById('canvas');
+var width = document.getElementById('width').value;
+var height;
+var scale = parseFloat(document.getElementById('scale').value);
+var columns = parseInt(document.getElementById('columns').value);
+var fileOffset = parseInt(document.getElementById('file-offset').value);
+var bitOffset = parseInt(document.getElementById('bit-offset').value);
+var inverse = document.getElementById('inverse').checked;
+
+document.getElementById('mode-select').onchange = e => { 
+  mode = document.getElementById('mode-select').value;
+  draw();
+}
+
+document.getElementById('width').onchange = e => { 
+  width = parseInt(document.getElementById('width').value);
+  draw();
+}
+
+document.getElementById('scale').onchange = e => { 
+  scale = parseFloat(document.getElementById('scale').value);
+  draw();
+}
+
+document.getElementById('columns').onchange = e => { 
+  columns = parseInt(document.getElementById('columns').value);
+  draw();
+}
+
+document.getElementById('file-offset').onchange = e => { 
+  fileOffset = parseInt(document.getElementById('file-offset').value);
+  draw();
+}
+
+document.getElementById('bit-offset').onchange = e => { 
+  bitOffset = parseInt(document.getElementById('bit-offset').value);
+  draw();
+}
+
+document.getElementById('inverse').onchange = e => { 
+  inverse = document.getElementById('inverse').checked;
+  draw();
+}
+
+document.getElementById('file-input').onchange = e => { 
+
+  const file = e.target.files[0]; 
+
+  const reader = new FileReader();
+  reader.readAsArrayBuffer(file);
+
+  reader.onload = readerEvent => {
+    content = new Uint8Array(readerEvent.target.result);
+    draw();
+  }
+
+}
+
+document.onkeyup = e => {
+  if(e.target.tagName === 'INPUT') {
+    return;
+  }
+  if(event.keyCode >= 48 && event.keyCode <= 57) {
+    document.getElementById('mode-select').selectedIndex = parseInt(event.key) - 1;
+    document.getElementById('mode-select').dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  if(event.keyCode === 37) {
+   const value = parseInt(document.getElementById('file-offset').value) - 1;
+   document.getElementById('file-offset').value = value;
+   document.getElementById('file-offset').dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  if(event.keyCode === 39) {
+   const value = parseInt(document.getElementById('file-offset').value) + 1;
+   document.getElementById('file-offset').value = value;
+   document.getElementById('file-offset').dispatchEvent(new Event('change', { bubbles: true }));
+  }
+}
+
+document.getElementById('canvas').onclick = e => {
+  const rect = canvas.getBoundingClientRect();
+  const x = event.clientX - rect.left - 1;
+  const y = event.clientY - rect.top - 1;
+  alert(calculateAddress(x, y));
+}
+
+function draw() {
+
+  if(!content) {
+    return;
+  }
+
+  let contentWithOffset = content.slice(fileOffset, content.length);
+  calculateBitOffset(contentWithOffset);
+  //contentWithOffset = calculateBitOffset(contentWithOffset);
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if(mode == 'gray8U') {
+    height = Math.ceil(contentWithOffset.length / width);
+    calculateFunction = calculateGrayscale8UData;
+  } else if(mode == 'gray16SLE') {
+    height = Math.ceil(contentWithOffset.length / 2 / width);
+    calculateFunction = calculateGrayscale16SLEData;
+  } else if(mode == 'gray16SBE') {
+    height = Math.ceil(contentWithOffset.length / 2 / width);
+    calculateFunction = calculateGrayscale16SBEData;
+  } else if(mode == 'color') {
+    height = Math.ceil(contentWithOffset.length / 3 / width);
+    calculateFunction = calculateColorData;
+  } else if(mode == 'bitmapMSB') {
+    height = Math.ceil(contentWithOffset.length * 8 / width);
+    calculateFunction = calculateBitmapMSBData;
+  } else if(mode == 'bitmapLSB') {
+    height = Math.ceil(contentWithOffset.length * 8 / width);
+    calculateFunction = calculateBitmapLSBData;
+  }
+
+  canvas.height = Math.ceil(height / columns);
+  canvas.width = width * columns;
+  for(let i = 0; i < columns; i++) {
+    const columnContentLength = Math.ceil(contentWithOffset.length / columns);
+    const columnContent = contentWithOffset.slice(i * columnContentLength, (i + 1) * columnContentLength); 
+    const data = calculateFunction(columnContent);
+    const imageData = ctx.getImageData(0, 0, width, height);
+    imageData.data.set(data);
+    ctx.putImageData(imageData, width * i, 0);
+  }
+  
+  canvas.style.width = (width * columns * scale) + 'px' ;
+
+}
+
+function calculateBitOffset(contentToOffset) {
+  for(let i = 0; i < contentToOffset.length; i++) {
+    let currentByte = contentToOffset[i];
+    let nextByte = 0;
+    if(i < contentToOffset.length) {
+      nextByte = contentToOffset[i+1];
+    }
+    currentByte = currentByte << bitOffset;
+    nextByte = nextByte >> (8 - bitOffset);
+    //contentToOffset[i] = (currentByte & nextByte) & 0xff;
+    contentToOffset[i] = (currentByte | nextByte) & 0xff;
+  }
+}
+
+function calculateBitmapMSBData(inputData) {
+  return calculateBitmapData(inputData, 'MSB');
+}
+function calculateBitmapLSBData(inputData) {
+  return calculateBitmapData(inputData, 'LSB');
+}
+function calculateBitmapData(inputData, bitorder) {
+  const data = new Uint8Array(inputData.length * 8 * 4);
+  for(let i = 0; i < inputData.length; i++) {
+    for(let k = 0; k < 8; k++) {
+
+      let bit = (inputData[i] >> 7 - k) & 1
+      if(bitorder == 'LSB') {
+        bit = (inputData[i] >> k) & 1
+      }
+
+      let bitSetValue = 0;
+      if(inverse) {
+        bitSetValue = 1
+      }
+      if(bit == bitSetValue) {
+        data[(k * 4) + (i * 4 * 8) + 0] = 255
+        data[(k * 4) + (i * 4 * 8) + 1] = 255;
+        data[(k * 4) + (i * 4 * 8) + 2] = 255;
+        data[(k * 4) + (i * 4 * 8) + 3] = 255;
+      } else {
+        data[(k * 4) + (i * 4 * 8) + 0] = 0;
+        data[(k * 4) + (i * 4 * 8) + 1] = 0;
+        data[(k * 4) + (i * 4 * 8) + 2] = 0;
+        data[(k * 4) + (i * 4 * 8) + 3] = 255;
+      }
+    }
+  }
+  return data;
+}
+
+function calculateColorData(inputData) {
+  const data = new Uint8Array(inputData.length / 3 * 4);
+  for(let i = 0; i < inputData.length; i++) {
+
+    let value1 = inputData[i * 3 + 0];
+    let value2 = inputData[i * 3 + 1];
+    let value3 = inputData[i * 3 + 2];
+
+    if(inverse) {
+      value1 = Math.abs(value1 - 255)
+      value2 = Math.abs(value2 - 255)
+      value3 = Math.abs(value3 - 255)
+    }
+
+    data[i * 4] = value1;
+    data[(i * 4) + 1] = value2;
+    data[(i * 4) + 2] = value3;
+    data[(i * 4) + 3] = 255;
+  }
+  return data;
+}
+
+function calculateGrayscale8UData(inputData) {
+  return calculateGrayscaleData(inputData, 'little', 1, false);
+}
+function calculateGrayscale16SLEData(inputData) {
+  return calculateGrayscaleData(inputData, 'little', 2, true);
+}
+function calculateGrayscale16SBEData(inputData) {
+  return calculateGrayscaleData(inputData, 'big', 2, true);
+}
+function calculateGrayscaleData(inputData, endianness, byteSize, signed) {
+  const data = new Uint8Array(inputData.length / byteSize * 4);
+  let dataPointer = 0;
+  for(let i = 0; i <= inputData.length - byteSize; i += byteSize) {
+    
+    let value = inputData[i];
+    if(endianness === 'big') {
+      value = inputData[i + byteSize - 1];
+    }
+    if(signed) {
+      // this converts the 2-complement byte to a propper 8 bit signed number
+      value = value << 24 >> 24;
+      // here we offset it, so we don't have negative and therefore good pixel values
+      value += 127;
+    }
+    if(inverse) {
+      value = Math.abs(value - 255);
+    }
+    data[dataPointer * 4] = value;
+    data[(dataPointer * 4) + 1] = value;
+    data[(dataPointer * 4) + 2] = value;
+    data[(dataPointer * 4) + 3] = 255;
+
+    dataPointer++;
+  }
+  return data;
+}
+
+function calculateAddress(x, y) {
+
+  if(mode == 'color') {
+    return 'can\'t get valid address in color mode (yet)';
+  }
+
+  if(columns > 1 && content.length % columns != 0) {
+    return 'can\'t get valid address, please change column count';
+  }
+  if(columns > 1 && content.length % width != 0) {
+    return 'can\'t get valid address, please change row width';
+  }
+
+  x = Math.floor(x / scale);
+  y = Math.floor(y / scale);
+  const currentColumn = Math.floor(x / width);
+  let address = (width * (height / columns) * currentColumn) + (y * width) + (x - (currentColumn * width));
+  if(mode == 'bitmapMSB' || mode == 'bitmapLSB') {
+    address += fileOffset * 8;
+    address = Math.floor(address / 8);
+  } else if(mode == 'gray16SLE' || mode == 'gray16SBE') {
+    address = Math.floor(address * 2) + fileOffset;
+  } else {
+    address += fileOffset;
+  }
+  const value = content[address];
+  return 'x: ' + x + '  y: ' + y + '\naddress: 0x' + address.toString(16) + ' (' + address + ')\nvalue: 0x' + value.toString(16) + ' (' + value + ')';
+}
+
+</script>
+</body>
+</html>
